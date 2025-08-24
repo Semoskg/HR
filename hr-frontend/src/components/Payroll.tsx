@@ -4,6 +4,7 @@ import api from "../api";
 function Payroll() {
   const [payroll, setPayroll] = useState([]);
   const [employeeId, setEmployeeId] = useState("");
+  const [month, setMonth] = useState(""); // new state for month
 
   useEffect(() => {
     api.get("/payroll").then((res) => setPayroll(res.data));
@@ -11,10 +12,22 @@ function Payroll() {
 
   const generatePayroll = async (e) => {
     e.preventDefault();
-    await api.post("/payroll/generate-one", { employee_id: employeeId });
-    const { data } = await api.get("/payroll");
-    setPayroll(data);
-    setEmployeeId("");
+
+    if (!employeeId || !month) {
+      alert("Please enter Employee ID and select Month");
+      return;
+    }
+
+    try {
+      await api.post("/payroll/generate-one", { employee_id: employeeId, month });
+      const { data } = await api.get("/payroll");
+      setPayroll(data);
+      setEmployeeId("");
+      setMonth("");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate payroll. Make sure employee ID and month are valid.");
+    }
   };
 
   return (
@@ -28,6 +41,12 @@ function Payroll() {
           onChange={(e) => setEmployeeId(e.target.value)}
           className="border p-2"
         />
+        <input
+          type="month" // month picker
+          value={month}
+          onChange={(e) => setMonth(e.target.value + "-01")} // convert YYYY-MM to YYYY-MM-01
+          className="border p-2"
+        />
         <button className="bg-green-500 text-white px-3 py-1 rounded">
           Generate Payroll
         </button>
@@ -36,7 +55,7 @@ function Payroll() {
       <ul>
         {payroll.map((p) => (
           <li key={p.id}>
-            {p.employee_id} — {p.salary} Birr
+            {p.employee_id} — {p.net_salary} Birr ({p.month_year})
           </li>
         ))}
       </ul>
