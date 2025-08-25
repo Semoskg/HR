@@ -25,6 +25,7 @@ export default function EmployeeList() {
         <input className="border p-2" placeholder="Gender" value={form.gender} onChange={e => setForm({...form, gender: e.target.value})} />
         <input className="border p-2" type="date" value={form.dob} onChange={e => setForm({...form, dob: e.target.value})} />
         <input className="border p-2" placeholder="Email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+        
         <button className="bg-green-600 text-white px-4">Add</button>
       </form>
       <ul>

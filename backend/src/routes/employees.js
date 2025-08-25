@@ -1,11 +1,13 @@
 import { Router } from 'express';
 import { pool } from '../db.js';
 import { req as requireFields } from '../utils/validate.js';
+import { authenticate, authorize } from "../middleware.js";
+
 
 const router = Router();
 
 // Create employee
-router.post('/', async (req, res) => {
+router.post('/', authenticate, authorize(['Admin', 'HR']), async (req, res) => {
   try {
     requireFields(req.body, [
       'first_name','last_name','gender','dob','email','phone','address',
@@ -39,35 +41,71 @@ router.post('/', async (req, res) => {
 });
 
 // List employees (basic)
-router.get('/', async (_req, res) => {
+// List employees
+// HR & Admin → see all
+// Manager → see only their team
+// Employee → see only themselves
+router.get('/', authenticate, async (req, res) => {
   try {
-    const { rows } = await pool.query(`
+    let query = `
       SELECT e.*, d.department_name, j.job_title, w.full_name AS warranty_name
       FROM Employees e
       JOIN Departments d ON d.department_id = e.department_id
       JOIN Jobs j ON j.job_id = e.job_id
       LEFT JOIN WarrantyPersons w ON w.warranty_id = e.warranty_id
-      ORDER BY e.employee_id DESC
-    `);
+    `;
+    let params = [];
+
+    if (req.user.role === 'Manager') {
+      query += ` WHERE e.manager_id=$1`;
+      params.push(req.user.employee_id);
+    } else if (req.user.role === 'Employee') {
+      query += ` WHERE e.employee_id=$1`;
+      params.push(req.user.employee_id);
+    }
+
+    query += ` ORDER BY e.employee_id DESC`;
+
+    const { rows } = await pool.query(query, params);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch employees' });
   }
 });
 
+
 // Get single employee
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticate, async (req, res) => {
   try {
-    const { rows } = await pool.query('SELECT * FROM Employees WHERE employee_id=$1', [req.params.id]);
-    if (!rows.length) return res.status(404).json({ error: 'Not found' });
-    res.json(rows[0]);
+    const id = parseInt(req.params.id);
+
+    if (['Admin', 'HR'].includes(req.user.role)) {
+      const { rows } = await pool.query('SELECT * FROM Employees WHERE employee_id=$1', [id]);
+      return res.json(rows[0] || {});
+    }
+
+    if (req.user.role === 'Manager') {
+      const { rows } = await pool.query(
+        'SELECT * FROM Employees WHERE employee_id=$1 AND manager_id=$2',
+        [id, req.user.employee_id]
+      );
+      return rows.length ? res.json(rows[0]) : res.status(403).json({ error: 'Forbidden' });
+    }
+
+    if (req.user.role === 'Employee' && id === req.user.employee_id) {
+      const { rows } = await pool.query('SELECT * FROM Employees WHERE employee_id=$1', [id]);
+      return res.json(rows[0]);
+    }
+
+    res.status(403).json({ error: 'Forbidden' });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch employee' });
   }
 });
 
-// Update employee
-router.put('/:id', async (req, res) => {
+
+// Update employee (HR & Admin only)
+router.put('/:id', authenticate, authorize(['Admin', 'HR']), async (req, res) => {
   try {
     const fields = [
       'first_name','last_name','gender','dob','email','phone','address','marital_status','photo_id',
@@ -80,17 +118,20 @@ router.put('/:id', async (req, res) => {
     const values = entries.map(([,v]) => v);
     values.push(req.params.id);
 
-    const { rows } = await pool.query(`UPDATE Employees SET ${setSql}, updated_at=CURRENT_TIMESTAMP WHERE employee_id=$${values.length} RETURNING *`, values);
+    const { rows } = await pool.query(
+      `UPDATE Employees SET ${setSql}, updated_at=CURRENT_TIMESTAMP WHERE employee_id=$${values.length} RETURNING *`,
+      values
+    );
     if (!rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: 'Failed to update employee' });
   }
 });
 
-// Delete employee
-router.delete('/:id', async (req, res) => {
+
+// Delete employee (HR & Admin only)
+router.delete('/:id', authenticate, authorize(['Admin', 'HR']), async (req, res) => {
   try {
     await pool.query('DELETE FROM Employees WHERE employee_id=$1', [req.params.id]);
     res.json({ ok: true });
@@ -98,5 +139,6 @@ router.delete('/:id', async (req, res) => {
     res.status(500).json({ error: 'Failed to delete employee' });
   }
 });
+
 
 export default router;
